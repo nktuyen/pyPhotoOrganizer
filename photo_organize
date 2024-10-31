@@ -1,0 +1,74 @@
+#!/bin/python3
+import concurrent.futures
+import os
+import sys
+import optparse
+import re
+import datetime
+import concurrent
+import json
+
+def walkdir(dir):
+    result: dict = {}
+    for parent, dirs, files in os.walk(dir, topdown=True):
+        for filename in files:
+            full_filename:str = os.path.join(parent, filename)
+            dir_path, file_name = os.path.split(full_filename)
+            file_title, file_xt = os.path.splitext(file_name)
+            strings: list = file_title.split("_")
+            datepart: str = strings[0].strip()
+            if len(datepart) < 8 or not datepart.isnumeric():
+                continue
+            year: str = datepart[0:4]
+            month: str = datepart[4:6]
+            day: str = datepart[6:8]
+            full_year_dir: str = os.path.join(dir,year)
+            if not os.path.exists(full_year_dir):
+                try:
+                    os.mkdir(full_year_dir)
+                except:
+                    continue
+            full_month_dir: str = os.path.join(full_year_dir, month)
+            if not os.path.exists(full_month_dir):
+                try:
+                    os.mkdir(full_month_dir)
+                except:
+                    continue
+            full_new_filename: str = os.path.join(full_month_dir, file_name)
+            try:
+                os.rename(full_filename, full_new_filename)
+            except Exception as ex:
+                print(f"Exception:{ex}")
+    return result
+
+
+def main():
+    parser: optparse.OptionParser = optparse.OptionParser('%prog [options] directories')
+    parser.add_option("-v", "--verbose", default=False, help="Verbose")
+    parser.add_option("-j", "--jobs", default=2, help="Number of jobs")
+    parser.add_option("-o", "--out", default=None, help="Output file")
+    opts,args = parser.parse_args()
+    if len(args) == 0:
+        parser.print_help()
+        exit(0)
+    
+    directories: list = []
+    for dir in args:
+        abs_path: str = os.path.abspath(dir)
+        if os.path.isdir(dir):
+            directories.append(abs_path)
+        elif os.path.isdir(abs_path):
+            directories.append(abs_path)
+        else:
+            print("%s is not a valid direcotry" % dir)
+    if len(directories) == 0:
+        exit(1)
+    
+    directories_tree: dict = {}
+    with concurrent.futures.ProcessPoolExecutor(max_workers=int(opts.jobs)) as executor:
+        future_to_dir = {executor.submit(walkdir, dir) : dir for dir in directories}
+        for future in concurrent.futures.as_completed(future_to_dir):
+            dir = future_to_dir[future]
+            directories_tree[dir] = future.result()
+
+main()
