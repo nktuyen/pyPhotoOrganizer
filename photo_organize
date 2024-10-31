@@ -7,22 +7,48 @@ import re
 import datetime
 import concurrent
 import json
+from PIL import Image
 
-def walkdir(dir):
+def walkdir(root_and_dir: tuple):
+    root = root_and_dir[0]
+    dir = root_and_dir[1]
     result: dict = {}
     for parent, dirs, files in os.walk(dir, topdown=True):
         for filename in files:
             full_filename:str = os.path.join(parent, filename)
             dir_path, file_name = os.path.split(full_filename)
             file_title, file_xt = os.path.splitext(file_name)
+            if file_title.startswith("IMG_"):
+                file_title = file_title[len("IMG_"):]
+            elif file_title.startswith("BeautyPlus_"):
+                file_title = file_title[len("BeautyPlus_"):]
+            else:
+                try:
+                    exif = Image.open(full_filename)._getexif()
+                    if exif is not None and exif.get(36867) is not None:
+                        file_title = str(exif.get(36867)) # 2016:02:28 10:06:47
+                        file_title = file_title.replace(":", "")
+                        file_title = file_title.replace(" ", "_")
+                except Exception as ex:
+                    #print(ex)
+                    pass
+            
             strings: list = file_title.split("_")
             datepart: str = strings[0].strip()
-            if len(datepart) < 8 or not datepart.isnumeric():
+            #print(f"datepart={datepart}")
+            if len(datepart) != 8 or not datepart.isnumeric():
+                full_new_filename: str = os.path.join(root, file_name)
+                if full_new_filename != full_filename:
+                    try:
+                        print(f"{full_filename} -> {full_new_filename}")
+                        os.rename(full_filename, full_new_filename)
+                    except Exception as ex:
+                        print(f"Exception:{ex}")
                 continue
             year: str = datepart[0:4]
             month: str = datepart[4:6]
             day: str = datepart[6:8]
-            full_year_dir: str = os.path.join(dir,year)
+            full_year_dir: str = os.path.join(root,year)
             if not os.path.exists(full_year_dir):
                 try:
                     os.mkdir(full_year_dir)
@@ -35,10 +61,14 @@ def walkdir(dir):
                 except:
                     continue
             full_new_filename: str = os.path.join(full_month_dir, file_name)
-            try:
-                os.rename(full_filename, full_new_filename)
-            except Exception as ex:
-                print(f"Exception:{ex}")
+            if full_new_filename != full_filename:
+                try:
+                    print(f"{full_filename} -> {full_new_filename}")
+                    os.rename(full_filename, full_new_filename)
+                except Exception as ex:
+                    print(f"Exception:{ex}")
+        for dirname in dirs:
+            walkdir((root, os.path.join(parent, dirname)))
     return result
 
 
@@ -64,11 +94,10 @@ def main():
     if len(directories) == 0:
         exit(1)
     
-    directories_tree: dict = {}
+    directories_tupe: list = []
+    for dir in directories:
+        directories_tupe.append((dir, dir))
     with concurrent.futures.ProcessPoolExecutor(max_workers=int(opts.jobs)) as executor:
-        future_to_dir = {executor.submit(walkdir, dir) : dir for dir in directories}
-        for future in concurrent.futures.as_completed(future_to_dir):
-            dir = future_to_dir[future]
-            directories_tree[dir] = future.result()
+        future_to_dir = {executor.submit(walkdir, root_and_dir) : root_and_dir for root_and_dir in directories_tupe}
 
 main()
