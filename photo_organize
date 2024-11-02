@@ -30,10 +30,10 @@ def process_file(full_name: str, root_path: str, verbose: bool = False) -> None:
     #print(f"file_ext={file_ext}")
 
     strings: list = relate_filename.split(os.sep)
-    if len(strings) == 3 and len(strings[0]) == 4 and len(strings[1]) == 2:
+    #if len(strings) == 3 and len(strings[0]) == 4 and len(strings[1]) == 2:
         #if verbose:
             #print(f"{relate_filename} is already satify")
-        return
+        #return
 
     if file_ext.upper() in [".HEIC"]:
         try:
@@ -44,8 +44,7 @@ def process_file(full_name: str, root_path: str, verbose: bool = False) -> None:
         except Exception as ex:
             if verbose:
                 print(f"[HEIC]Exception:{ex}")
-            return
-    elif file_ext.upper() in [".MP3", ".MP4", ".MOV", ".AVI"]:
+    elif file_ext.upper() in [".MP3", ".MP4", ".MOV", ".AVI", ".WMV"]:
         try:
             media = ffmpeg.probe(full_name)
             if media is not None:
@@ -60,39 +59,52 @@ def process_file(full_name: str, root_path: str, verbose: bool = False) -> None:
         except Exception as ex:
             if verbose:
                 print(f"Exception:{ex}")
-            return
-    elif file_ext.upper() in [".BMP", ".JPG", ".PNG", ".JPEG", ".GIF"]:
+    elif file_ext.upper() in [".BMP", ".JPG", ".PNG", ".JPEG", ".GIF", ".TIFF"]:
         try:
             img = PIL.Image.open(full_name)
             if img is not None:
                 exif_data = img._getexif()
                 if exif_data is not None:
-                    date_taken = exif_data[PIL.ExifTags.Base.DateTimeOriginal]
+                    try:
+                        date_taken = exif_data[PIL.ExifTags.Base.DateTimeOriginal]
+                    except:
+                        pass
                     if date_taken is None or len(date_taken) == 0:
-                        date_taken = exif_data[PIL.ExifTags.Base.DateTimeDigitized]
+                        try:
+                            date_taken = exif_data[PIL.ExifTags.Base.DateTimeDigitized]
+                        except:
+                            pass
                     if date_taken is None or len(date_taken) == 0:
-                        date_taken = exif_data[PIL.ExifTags.Base.DateTime]
+                        try:
+                            date_taken = exif_data[PIL.ExifTags.Base.DateTime]
+                        except:
+                            pass
         except Exception as ex:
             if verbose:
                 print(f"Exception:{ex}")
+    #Cannot extract meta data -> Determine creation date from file name or system created time
+    if date_taken is None or len(date_taken) <= 0:
+        r = re.compile(r"^([a-zA-Z_])([0-9]+)")
+        m = r.match(file_title)
+        if m:
+            print(file_title)
+            print(m)
             return
-    if date_taken is None or len(date_taken)<= 0: #Use system creation time
-        try:
-            c_time = os.path.getctime(full_name)
-            if c_time is not None:
-                local_time = datetime.datetime.fromtimestamp(c_time)
-                date_taken = str(local_time).replace("-", "")
-        except Exception as ex:
-            if verbose:
-                print(f"Exception:{ex}")
-    if date_taken is None or len(date_taken) < 8:
-        if verbose:
-            print(f"{date_taken} Cannot detect taken date of {relate_filename}")
-        
+        else:
+            try:
+                c_time = os.path.getmtime(full_name)
+                if c_time is not None:
+                    local_time = datetime.datetime.fromtimestamp(c_time)
+                    date_taken = str(local_time).replace("-", "")
+            except Exception as ex:
+                if verbose:
+                    print(f"Exception:{ex}")
+    
+    if date_taken is None or len(date_taken) <= 0:
         full_name_new: str = os.path.join(root_path, file_name)
         if full_name_new.lower() == full_name.lower():
-            #if verbose:
-                #print(f"{full_name} is already in right place")
+            if verbose:
+                print(f"{full_name} - Ignored")
             return
         relate_filename_new: str = full_name_new[len(root_path):]
         if relate_filename_new.startswith(os.sep):
@@ -119,8 +131,8 @@ def process_file(full_name: str, root_path: str, verbose: bool = False) -> None:
     full_name_new: str = os.path.join(month_dir, file_name)
     #print(f"full_name_new={full_name_new}")
     if full_name_new.lower() == full_name.lower():
-        #if verbose:
-            #print(f"{full_name} is already in right place")
+        if verbose:
+            print(f"{full_name} - Ignore")
         return
     relate_filename_new: str = full_name_new[len(root_path):]
     if relate_filename_new.startswith(os.sep):
@@ -146,9 +158,9 @@ def walkdir(args: tuple):
 
 def main():
     parser: optparse.OptionParser = optparse.OptionParser('%prog [options] directories')
-    parser.add_option("-v", "--verbose", action="store_false", default=False)
+    parser.add_option("-v", "--verbose", action="store_false")
     parser.add_option("-j", "--jobs", default=2)
-    parser.add_option("-r", "--recursive", action="store_false", default=False)
+    parser.add_option("-r", "--recursive", action="store_false")
     opts,args = parser.parse_args()
     if len(args) == 0:
         parser.print_help()
@@ -175,6 +187,12 @@ def main():
     args_list: list = []
     for dir in directories:
         args_list.append((dir, dir, verbose, recursive))
+
+    print(f"jobs:{opts.jobs}")
+    print(f"verbose:{verbose}")
+    print(f"recursive:{recursive}")
+    print()
+    
     with concurrent.futures.ProcessPoolExecutor(max_workers=int(opts.jobs)) as executor:
         future_to_dir = {executor.submit(walkdir, args) : args for args in args_list}
 
