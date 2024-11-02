@@ -7,7 +7,125 @@ import re
 import datetime
 import concurrent
 import json
-from PIL import Image
+import PIL
+import PIL.ExifTags
+import PIL.Image
+import exifread #Must be version 2.3.2
+import ffmpeg
+
+
+
+def process_file(full_name: str, root_path: str, verbose: bool = True) -> None:
+    relate_filename = full_name[len(root_path):]
+    if relate_filename.startswith(os.sep):
+        relate_filename = relate_filename[len(os.sep):]
+    dir_name, file_name = os.path.split(full_name)
+    file_title, file_ext = os.path.splitext(file_name)
+    date_taken: str = None
+
+    #print(f"relate_filename={relate_filename}")
+    #print(f"dir_name={dir_name}")
+    #print(f"file_name={file_name}")
+    #print(f"file_title={file_title}")
+    #print(f"file_ext={file_ext}")
+
+    strings: list = relate_filename.split(os.sep)
+    if len(strings) == 3 and len(strings[0]) == 4 and len(strings[1]) == 2:
+        #if verbose:
+            #print(f"{relate_filename} is already satify")
+        return
+
+    if file_ext.upper() in [".HEIC"]:
+        try:
+            with open(full_name, 'rb') as heic_file:
+                tags = exifread.process_file(heic_file)
+                tag = tags["Image DateTime"]
+                date_taken = tag.values
+        except Exception as ex:
+            if verbose:
+                print(f"[HEIC]Exception:{ex}")
+            return
+    elif file_ext.upper() in [".MP3", ".MP4", ".MOV"]:
+        try:
+            media = ffmpeg.probe(full_name)
+            if media is not None:
+                streams = media["streams"]
+                for stream in  streams:
+                    if stream is not None:
+                        tags = stream["tags"]
+                        if tags is not None:
+                            if "creation_time" in tags:
+                                date_taken = tags["creation_time"].replace("-", "")
+                                break
+        except Exception as ex:
+            if verbose:
+                print(f"Exception:{ex}")
+            return
+    else:
+        try:
+            img = PIL.Image.open(full_name)
+            if img is not None:
+                exif_data = img._getexif()
+                if exif_data is not None:
+                    date_taken = exif_data[PIL.ExifTags.Base.DateTimeOriginal]
+                    if date_taken is None or len(date_taken) == 0:
+                        date_taken = exif_data[PIL.ExifTags.Base.DateTimeDigitized]
+                    if date_taken is None or len(date_taken) == 0:
+                        date_taken = exif_data[PIL.ExifTags.Base.DateTime]
+        except Exception as ex:
+            if verbose:
+                print(f"Exception:{ex}")
+            return
+    if date_taken is None: #Try to extract creation time by file name
+        reg = re.compile(r"^[a-zA-Z_]2[0-9]*")
+        if reg.match(file_title):
+            print(full_name)
+    if date_taken is None or len(date_taken)<= 0: #Use system creation time
+        c_time = os.path.getctime(full_name)
+
+    if date_taken is None or len(date_taken) < 8:
+        if verbose:
+            print(f"{date_taken} Cannot detect taken date of {relate_filename}")
+        
+        full_name_new: str = os.path.join(root_path, file_name)
+        if full_name_new.lower() == full_name.lower():
+            #if verbose:
+                #print(f"{full_name} is already in right place")
+            return
+        relate_filename_new: str = full_name_new[len(root_path):]
+        if relate_filename_new.startswith(os.sep):
+            relate_filename_new = relate_filename_new[len(os.sep)]
+        print(f"{relate_filename} => {relate_filename_new}")
+        os.rename(full_name, full_name_new)
+        return
+    date_taken = date_taken.replace(":", "")
+    year: str = date_taken[0:4]
+    month: str = date_taken[4:6]
+    day: str = date_taken[6:8]
+    #print(f"date_taken={date_taken}")
+    #print(f"year={year}")
+    #print(f"month={month}")
+    #print(f"day={day}")
+    year_dir: str = os.path.join(root_path, year)
+    #print(f"year_dir={year_dir}")
+    if not os.path.exists(year_dir):
+        os.mkdir(year_dir)
+    month_dir: str = os.path.join(year_dir, month)
+    #print(f"month_dir={month_dir}")
+    if not os.path.exists(month_dir):
+        os.mkdir(month_dir)
+    full_name_new: str = os.path.join(month_dir, file_name)
+    #print(f"full_name_new={full_name_new}")
+    if full_name_new.lower() == full_name.lower():
+        #if verbose:
+            #print(f"{full_name} is already in right place")
+        return
+    relate_filename_new: str = full_name_new[len(root_path):]
+    if relate_filename_new.startswith(os.sep):
+        relate_filename_new = relate_filename_new[len(os.sep):]
+    print(f"{relate_filename} => {relate_filename_new}")
+    os.rename(full_name, full_name_new)
+
 
 def walkdir(root_and_dir: tuple):
     root = root_and_dir[0]
@@ -16,57 +134,7 @@ def walkdir(root_and_dir: tuple):
     for parent, dirs, files in os.walk(dir, topdown=True):
         for filename in files:
             full_filename:str = os.path.join(parent, filename)
-            dir_path, file_name = os.path.split(full_filename)
-            file_title, file_xt = os.path.splitext(file_name)
-            if file_title.startswith("IMG_"):
-                file_title = file_title[len("IMG_"):]
-            elif file_title.startswith("BeautyPlus_"):
-                file_title = file_title[len("BeautyPlus_"):]
-            else:
-                try:
-                    exif = Image.open(full_filename)._getexif()
-                    if exif is not None and exif.get(36867) is not None:
-                        file_title = str(exif.get(36867)) # 2016:02:28 10:06:47
-                        file_title = file_title.replace(":", "")
-                        file_title = file_title.replace(" ", "_")
-                except Exception as ex:
-                    #print(ex)
-                    pass
-            
-            strings: list = file_title.split("_")
-            datepart: str = strings[0].strip()
-            #print(f"datepart={datepart}")
-            if len(datepart) != 8 or not datepart.isnumeric():
-                full_new_filename: str = os.path.join(root, file_name)
-                if full_new_filename != full_filename:
-                    try:
-                        print(f"{full_filename} -> {full_new_filename}")
-                        os.rename(full_filename, full_new_filename)
-                    except Exception as ex:
-                        print(f"Exception:{ex}")
-                continue
-            year: str = datepart[0:4]
-            month: str = datepart[4:6]
-            day: str = datepart[6:8]
-            full_year_dir: str = os.path.join(root,year)
-            if not os.path.exists(full_year_dir):
-                try:
-                    os.mkdir(full_year_dir)
-                except:
-                    continue
-            full_month_dir: str = os.path.join(full_year_dir, month)
-            if not os.path.exists(full_month_dir):
-                try:
-                    os.mkdir(full_month_dir)
-                except:
-                    continue
-            full_new_filename: str = os.path.join(full_month_dir, file_name)
-            if full_new_filename != full_filename:
-                try:
-                    print(f"{full_filename} -> {full_new_filename}")
-                    os.rename(full_filename, full_new_filename)
-                except Exception as ex:
-                    print(f"Exception:{ex}")
+            process_file(full_filename, root)
         for dirname in dirs:
             walkdir((root, os.path.join(parent, dirname)))
     return result
