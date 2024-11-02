@@ -15,7 +15,7 @@ import ffmpeg
 
 
 
-def process_file(full_name: str, root_path: str, verbose: bool = True) -> None:
+def process_file(full_name: str, root_path: str, verbose: bool = False) -> None:
     relate_filename = full_name[len(root_path):]
     if relate_filename.startswith(os.sep):
         relate_filename = relate_filename[len(os.sep):]
@@ -45,7 +45,7 @@ def process_file(full_name: str, root_path: str, verbose: bool = True) -> None:
             if verbose:
                 print(f"[HEIC]Exception:{ex}")
             return
-    elif file_ext.upper() in [".MP3", ".MP4", ".MOV"]:
+    elif file_ext.upper() in [".MP3", ".MP4", ".MOV", ".AVI"]:
         try:
             media = ffmpeg.probe(full_name)
             if media is not None:
@@ -61,7 +61,7 @@ def process_file(full_name: str, root_path: str, verbose: bool = True) -> None:
             if verbose:
                 print(f"Exception:{ex}")
             return
-    else:
+    elif file_ext.upper() in [".BMP", ".JPG", ".PNG", ".JPEG", ".GIF"]:
         try:
             img = PIL.Image.open(full_name)
             if img is not None:
@@ -76,13 +76,15 @@ def process_file(full_name: str, root_path: str, verbose: bool = True) -> None:
             if verbose:
                 print(f"Exception:{ex}")
             return
-    if date_taken is None: #Try to extract creation time by file name
-        reg = re.compile(r"^[a-zA-Z_]2[0-9]*")
-        if reg.match(file_title):
-            print(full_name)
     if date_taken is None or len(date_taken)<= 0: #Use system creation time
-        c_time = os.path.getctime(full_name)
-
+        try:
+            c_time = os.path.getctime(full_name)
+            if c_time is not None:
+                local_time = datetime.datetime.fromtimestamp(c_time)
+                date_taken = str(local_time).replace("-", "")
+        except Exception as ex:
+            if verbose:
+                print(f"Exception:{ex}")
     if date_taken is None or len(date_taken) < 8:
         if verbose:
             print(f"{date_taken} Cannot detect taken date of {relate_filename}")
@@ -127,24 +129,26 @@ def process_file(full_name: str, root_path: str, verbose: bool = True) -> None:
     os.rename(full_name, full_name_new)
 
 
-def walkdir(root_and_dir: tuple):
-    root = root_and_dir[0]
-    dir = root_and_dir[1]
+def walkdir(args: tuple):
+    root = args[0]
+    dir = args[1]
+    verbose: bool = args[2]
+    recursive: bool = args[3]
     result: dict = {}
     for parent, dirs, files in os.walk(dir, topdown=True):
         for filename in files:
             full_filename:str = os.path.join(parent, filename)
-            process_file(full_filename, root)
+            process_file(full_filename, root, verbose)
         for dirname in dirs:
-            walkdir((root, os.path.join(parent, dirname)))
+            walkdir((root, os.path.join(parent, dirname), verbose, recursive))
     return result
 
 
 def main():
     parser: optparse.OptionParser = optparse.OptionParser('%prog [options] directories')
-    parser.add_option("-v", "--verbose", default=False, help="Verbose")
-    parser.add_option("-j", "--jobs", default=2, help="Number of jobs")
-    parser.add_option("-o", "--out", default=None, help="Output file")
+    parser.add_option("-v", "--verbose", action="store_false", default=False)
+    parser.add_option("-j", "--jobs", default=2)
+    parser.add_option("-r", "--recursive", action="store_false", default=False)
     opts,args = parser.parse_args()
     if len(args) == 0:
         parser.print_help()
@@ -162,10 +166,16 @@ def main():
     if len(directories) == 0:
         exit(1)
     
-    directories_tupe: list = []
+    verbose: bool = False
+    recursive: bool = False
+    if opts.verbose is not None:
+        verbose = True
+    if opts.recursive is not None:
+        recursive = True
+    args_list: list = []
     for dir in directories:
-        directories_tupe.append((dir, dir))
+        args_list.append((dir, dir, verbose, recursive))
     with concurrent.futures.ProcessPoolExecutor(max_workers=int(opts.jobs)) as executor:
-        future_to_dir = {executor.submit(walkdir, root_and_dir) : root_and_dir for root_and_dir in directories_tupe}
+        future_to_dir = {executor.submit(walkdir, args) : args for args in args_list}
 
 main()
