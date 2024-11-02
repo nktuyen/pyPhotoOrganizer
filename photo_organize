@@ -12,10 +12,33 @@ import PIL.ExifTags
 import PIL.Image
 import exifread #Must be version 2.3.2
 import ffmpeg
+import stat
 
 
-
-def process_file(full_name: str, root_path: str, verbose: bool = False) -> None:
+def organize_file(full_name: str, root_path: str, verbose: bool = False, hidden_files: bool = False, system_files: bool = False, excluded_patterns: list = None) -> None:
+    """Organize file"""
+    #Filter file by attributes
+    try:
+        file_stat = os.stat(full_name)
+        if file_stat.st_file_attributes & stat.FILE_ATTRIBUTE_ARCHIVE:
+            print(" - archive")
+        if file_stat.st_file_attributes & stat.FILE_ATTRIBUTE_SYSTEM:
+            print(" - system")
+            if not system_files:
+                if verbose:
+                    print(f"{full_name} - Ignored: System file")
+                return
+        if file_stat.st_file_attributes & stat.FILE_ATTRIBUTE_HIDDEN:
+            print(" - hidden")
+            if not hidden_files:
+                if verbose:
+                    print(f"{full_name} - Ignored: Hidden file")
+                return
+        if file_stat.st_file_attributes & stat.FILE_ATTRIBUTE_READONLY:
+            print(" - read only")
+    except Exception as ex:
+        pass
+    
     relate_filename = full_name[len(root_path):]
     if relate_filename.startswith(os.sep):
         relate_filename = relate_filename[len(os.sep):]
@@ -23,17 +46,24 @@ def process_file(full_name: str, root_path: str, verbose: bool = False) -> None:
     file_title, file_ext = os.path.splitext(file_name)
     date_taken: str = None
 
+    #Filter file by wildcard
+    if isinstance(excluded_patterns, list):
+        for pattern in excluded_patterns:
+            if pattern == full_name or pattern == file_name:
+                if verbose:
+                    print(f"{full_name} - Ignored: Excluded file")
+                return
+            rex = re.compile('^' + pattern.replace('*',  '.*').replace('?', '.') + '$')
+            if rex.match(full_name):
+                if verbose:
+                    print(f"{full_name} - Ignored: Excluded file")
+                return
+
     #print(f"relate_filename={relate_filename}")
     #print(f"dir_name={dir_name}")
     #print(f"file_name={file_name}")
     #print(f"file_title={file_title}")
     #print(f"file_ext={file_ext}")
-
-    strings: list = relate_filename.split(os.sep)
-    #if len(strings) == 3 and len(strings[0]) == 4 and len(strings[1]) == 2:
-        #if verbose:
-            #print(f"{relate_filename} is already satify")
-        #return
 
     if file_ext.upper() in [".HEIC"]:
         try:
@@ -104,7 +134,7 @@ def process_file(full_name: str, root_path: str, verbose: bool = False) -> None:
         full_name_new: str = os.path.join(root_path, file_name)
         if full_name_new.lower() == full_name.lower():
             if verbose:
-                print(f"{full_name} - Ignored")
+                print(f"{full_name} - Ignored: Already in place")
             return
         relate_filename_new: str = full_name_new[len(root_path):]
         if relate_filename_new.startswith(os.sep):
@@ -132,7 +162,7 @@ def process_file(full_name: str, root_path: str, verbose: bool = False) -> None:
     #print(f"full_name_new={full_name_new}")
     if full_name_new.lower() == full_name.lower():
         if verbose:
-            print(f"{full_name} - Ignore")
+            print(f"{full_name} - Ignored: Already in place")
         return
     relate_filename_new: str = full_name_new[len(root_path):]
     if relate_filename_new.startswith(os.sep):
@@ -142,55 +172,80 @@ def process_file(full_name: str, root_path: str, verbose: bool = False) -> None:
 
 
 def walkdir(args: tuple):
+    """Walk on directory"""
     root = args[0]
-    dir = args[1]
+    dir_to_walk = args[1]
     verbose: bool = args[2]
     recursive: bool = args[3]
-    result: dict = {}
-    for parent, dirs, files in os.walk(dir, topdown=True):
+    hidden_flag: bool = args[4]
+    system_flag: bool = args[5]
+    excluded_patterns: list = args[6]
+    for parent, dirs, files in os.walk(dir_to_walk, topdown=True):
         for filename in files:
             full_filename:str = os.path.join(parent, filename)
-            process_file(full_filename, root, verbose)
+            organize_file(full_filename, root, verbose, hidden_flag, system_flag, excluded_patterns)
         for dirname in dirs:
-            walkdir((root, os.path.join(parent, dirname), verbose, recursive))
-    return result
-
+            walkdir((root, os.path.join(parent, dirname), verbose, recursive, hidden_flag, system_flag, excluded_patterns))
 
 def main():
+    """Main function"""
     parser: optparse.OptionParser = optparse.OptionParser('%prog [options] directories')
-    parser.add_option("-v", "--verbose", action="store_false")
     parser.add_option("-j", "--jobs", default=2)
+    parser.add_option("-v", "--verbose", action="store_false")
     parser.add_option("-r", "--recursive", action="store_false")
+    parser.add_option("", "--hidden", action="store_false", help="Process hidden files")
+    parser.add_option("", "--system", action="store_false", help="Process system files")
+    parser.add_option("-x", "--exclude", default=None, help="Excluded patterns")
+
     opts,args = parser.parse_args()
     if len(args) == 0:
         parser.print_help()
         exit(0)
     
     directories: list = []
-    for dir in args:
-        abs_path: str = os.path.abspath(dir)
-        if os.path.isdir(dir):
+    for dirname in args:
+        abs_path: str = os.path.abspath(dirname)
+        if os.path.isdir(dirname):
             directories.append(abs_path)
         elif os.path.isdir(abs_path):
             directories.append(abs_path)
         else:
-            print("%s is not a valid direcotry" % dir)
+            print(f"{dirname} is not a valid direcotry")
     if len(directories) == 0:
         exit(1)
     
     verbose: bool = False
     recursive: bool = False
+    hidden_files: bool = False
+    system_files: bool = False
+    excluded_pattern: list = []
+
+    if opts.exclude is not None:
+        temp_list: list = str(opts.exclude).split(',')
+        for string in temp_list:
+            l: list = string.split(';')
+            for pattern in l:
+                excluded_pattern.append(pattern.strip())
     if opts.verbose is not None:
         verbose = True
     if opts.recursive is not None:
         recursive = True
+    if opts.hidden is not None:
+        hidden_files = True
+    if opts.system is not None:
+        system_files = True
     args_list: list = []
-    for dir in directories:
-        args_list.append((dir, dir, verbose, recursive))
+    for dirname in directories:
+        args_list.append((dirname, dirname, verbose, recursive, hidden_files, system_files, excluded_pattern))
 
-    print(f"jobs:{opts.jobs}")
-    print(f"verbose:{verbose}")
-    print(f"recursive:{recursive}")
+    print(f"{'*'*50}")
+    print(f"Jobs\t\t:{opts.jobs}")
+    print(f"Verbose\t\t:{verbose}")
+    print(f"Recursive\t:{recursive}")
+    print(f"Hidden\t\t:{hidden_files}")
+    print(f"System\t\t:{system_files}")
+    print(f"Excluded\t:{excluded_pattern}")
+    print(f"{'*'*50}")
     print()
     
     with concurrent.futures.ProcessPoolExecutor(max_workers=int(opts.jobs)) as executor:
