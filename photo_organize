@@ -14,28 +14,23 @@ import exifread #Must be version 2.3.2
 import ffmpeg
 import stat
 
+DEBUG: bool = False
 
 def organize_file(full_name: str, root_path: str, verbose: bool = False, hidden_files: bool = False, system_files: bool = False, excluded_patterns: list = None) -> None:
     """Organize file"""
     #Filter file by attributes
     try:
         file_stat = os.stat(full_name)
-        if file_stat.st_file_attributes & stat.FILE_ATTRIBUTE_ARCHIVE:
-            print(" - archive")
         if file_stat.st_file_attributes & stat.FILE_ATTRIBUTE_SYSTEM:
-            print(" - system")
             if not system_files:
                 if verbose:
                     print(f"{full_name} - Ignored: System file")
                 return
         if file_stat.st_file_attributes & stat.FILE_ATTRIBUTE_HIDDEN:
-            print(" - hidden")
             if not hidden_files:
                 if verbose:
                     print(f"{full_name} - Ignored: Hidden file")
                 return
-        if file_stat.st_file_attributes & stat.FILE_ATTRIBUTE_READONLY:
-            print(" - read only")
     except Exception as ex:
         pass
     
@@ -70,7 +65,8 @@ def organize_file(full_name: str, root_path: str, verbose: bool = False, hidden_
             with open(full_name, 'rb') as heic_file:
                 tags = exifread.process_file(heic_file)
                 tag = tags["Image DateTime"]
-                date_taken = tag.values
+                date_taken = tag.values.replace(":", "")
+                #print(f"date_taken={date_taken}")
         except Exception as ex:
             if verbose:
                 print(f"[HEIC]Exception:{ex}")
@@ -85,6 +81,7 @@ def organize_file(full_name: str, root_path: str, verbose: bool = False, hidden_
                         if tags is not None:
                             if "creation_time" in tags:
                                 date_taken = tags["creation_time"].replace("-", "")
+                                #print(f"1.date_taken={date_taken}")
                                 break
         except Exception as ex:
             if verbose:
@@ -96,41 +93,55 @@ def organize_file(full_name: str, root_path: str, verbose: bool = False, hidden_
                 exif_data = img._getexif()
                 if exif_data is not None:
                     try:
-                        date_taken = exif_data[PIL.ExifTags.Base.DateTimeOriginal]
+                        date_taken = exif_data[PIL.ExifTags.Base.DateTimeOriginal].replace(":", "")
+                        #print(f"2.date_taken={date_taken}")
                     except:
                         pass
                     if date_taken is None or len(date_taken) == 0:
                         try:
-                            date_taken = exif_data[PIL.ExifTags.Base.DateTimeDigitized]
+                            date_taken = exif_data[PIL.ExifTags.Base.DateTimeDigitized].replace(":", "")
+                            #print(f"3.date_taken={date_taken}")
                         except:
                             pass
                     if date_taken is None or len(date_taken) == 0:
                         try:
-                            date_taken = exif_data[PIL.ExifTags.Base.DateTime]
+                            date_taken = exif_data[PIL.ExifTags.Base.DateTime].replace(":", "")
+                            #print(f"4.date_taken={date_taken}")
                         except:
                             pass
         except Exception as ex:
             if verbose:
                 print(f"Exception:{ex}")
+    if date_taken is not None:
+        for num in range(0, len(date_taken)):
+            if date_taken[num].isdigit() is False:
+                date_taken = date_taken[:num]
+                break
     #Cannot extract meta data -> Determine creation date from file name or system created time
     if date_taken is None or len(date_taken) <= 0:
-        r = re.compile(r"^([a-zA-Z_])([0-9]+)")
-        m = r.match(file_title)
-        if m:
-            print(file_title)
-            print(m)
-            return
+        r1 = re.compile(r"^20[0-2][0-9]-[0-1][1-9]-[0-1][1-9]_")
+        m1 = r1.match(file_title)
+        r2 = re.compile(r"^20[0-2][0-9][0-1][1-9][0-1][1-9]_")
+        m2 = r2.match(file_title)
+        if m1:
+            date_taken = file_title[m1.start(): m1.end()].replace("-", "")
+            #print(f"5.1.date_taken={date_taken}")
+        elif m2:
+            date_taken = file_title[m2.start(): m2.end()]
+            #print(f"5.2.date_taken={date_taken}")
         else:
             try:
                 c_time = os.path.getmtime(full_name)
                 if c_time is not None:
                     local_time = datetime.datetime.fromtimestamp(c_time)
                     date_taken = str(local_time).replace("-", "")
+                    #print(f"6.date_taken={date_taken}")
+                    date_taken = None
             except Exception as ex:
                 if verbose:
                     print(f"Exception:{ex}")
     
-    if date_taken is None or len(date_taken) <= 0:
+    if (date_taken is None) or (len(date_taken) <= 0) or (date_taken.isnumeric() is False):
         full_name_new: str = os.path.join(root_path, file_name)
         if full_name_new.lower() == full_name.lower():
             if verbose:
@@ -138,11 +149,10 @@ def organize_file(full_name: str, root_path: str, verbose: bool = False, hidden_
             return
         relate_filename_new: str = full_name_new[len(root_path):]
         if relate_filename_new.startswith(os.sep):
-            relate_filename_new = relate_filename_new[len(os.sep)]
+            relate_filename_new = relate_filename_new[len(os.sep):]
         print(f"{relate_filename} => {relate_filename_new}")
         os.rename(full_name, full_name_new)
         return
-    date_taken = date_taken.replace(":", "")
     year: str = date_taken[0:4]
     month: str = date_taken[4:6]
     day: str = date_taken[6:8]
@@ -180,12 +190,13 @@ def walkdir(args: tuple):
     hidden_flag: bool = args[4]
     system_flag: bool = args[5]
     excluded_patterns: list = args[6]
-    for parent, dirs, files in os.walk(dir_to_walk, topdown=True):
-        for filename in files:
-            full_filename:str = os.path.join(parent, filename)
+    
+    for name in os.listdir(dir_to_walk):
+        full_filename:str = os.path.join(dir_to_walk, name)
+        if os.path.isfile(full_filename):
             organize_file(full_filename, root, verbose, hidden_flag, system_flag, excluded_patterns)
-        for dirname in dirs:
-            walkdir((root, os.path.join(parent, dirname), verbose, recursive, hidden_flag, system_flag, excluded_patterns))
+        elif os.path.isdir(full_filename) and recursive:
+            walkdir((root, full_filename, verbose, recursive, hidden_flag, system_flag, excluded_patterns,))
 
 def main():
     """Main function"""
@@ -236,7 +247,7 @@ def main():
         system_files = True
     args_list: list = []
     for dirname in directories:
-        args_list.append((dirname, dirname, verbose, recursive, hidden_files, system_files, excluded_pattern))
+        args_list.append((dirname, dirname, verbose, recursive, hidden_files, system_files, excluded_pattern,))
 
     print(f"{'*'*50}")
     print(f"Jobs\t\t:{opts.jobs}")
@@ -248,7 +259,8 @@ def main():
     print(f"{'*'*50}")
     print()
     
-    with concurrent.futures.ProcessPoolExecutor(max_workers=int(opts.jobs)) as executor:
-        future_to_dir = {executor.submit(walkdir, args) : args for args in args_list}
+    for dirname in directories:
+        walkdir((dirname, dirname, verbose, recursive, hidden_files, system_files, excluded_pattern,))
 
-main()
+if __name__=="__main__":
+    main()
