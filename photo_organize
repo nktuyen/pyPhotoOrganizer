@@ -119,9 +119,9 @@ def organize_file(full_name: str, root_path: str, verbose: bool = False, hidden_
                 break
     #Cannot extract meta data -> Determine creation date from file name or system created time
     if date_taken is None or len(date_taken) <= 0:
-        r1 = re.compile(r"^20[0-2][0-9]-[0-1][1-9]-[0-1][1-9]_")
+        r1 = re.compile(r"^20[0-2][0-9]-[0-1][0-9]-[0-3][0-9]")
         m1 = r1.match(file_title)
-        r2 = re.compile(r"^20[0-2][0-9][0-1][1-9][0-1][1-9]_")
+        r2 = re.compile(r"^20[0-2][0-9][0-1][0-9][0-3][0-9]")
         m2 = r2.match(file_title)
         if m1:
             date_taken = file_title[m1.start(): m1.end()].replace("-", "")
