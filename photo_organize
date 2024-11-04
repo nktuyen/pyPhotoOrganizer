@@ -40,6 +40,7 @@ def organize_file(full_name: str, root_path: str, verbose: bool = False, hidden_
     dir_name, file_name = os.path.split(full_name)
     file_title, file_ext = os.path.splitext(file_name)
     date_taken: str = None
+    file_prefix: str = ''
 
     #Filter file by wildcard
     if isinstance(excluded_patterns, list):
@@ -70,7 +71,7 @@ def organize_file(full_name: str, root_path: str, verbose: bool = False, hidden_
         except Exception as ex:
             if verbose:
                 print(f"[HEIC]Exception:{ex}")
-    elif file_ext.upper() in [".MP3", ".MP4", ".MOV", ".AVI", ".WMV"]:
+    elif file_ext.upper() in [".MP4", ".MOV", ".AVI", ".WMV"]:
         try:
             media = ffmpeg.probe(full_name)
             if media is not None:
@@ -125,6 +126,15 @@ def organize_file(full_name: str, root_path: str, verbose: bool = False, hidden_
         m2 = r2.match(file_title)
         r3 = re.compile(r"\b[a-zA-Z_]+_20[0-2][0-9][0-1][0-9][0-3][0-9]")
         m3 = r3.match(file_title)
+
+        if m1 or m2:
+            if file_ext.upper() in [".BMP", ".JPG", ".PNG", ".JPEG", ".GIF", ".TIFF"]:
+                file_prefix = "IMG_"
+            elif file_ext.upper() in [".MP4", ".MOV", ".AVI", ".WMV"]:
+                file_prefix = "VIDEO_"
+            elif file_ext.upper() in [".MP3", ".WMA", ".WAV", ".AAC"]:
+                file_ext = "AUDIO_"
+
         if m1:
             date_taken = file_title[m1.start(): m1.end()].replace("-", "")
             #print(f"5.1.date_taken={date_taken}")
@@ -145,14 +155,16 @@ def organize_file(full_name: str, root_path: str, verbose: bool = False, hidden_
                 c_time = os.path.getmtime(full_name)
                 if c_time is not None:
                     local_time = datetime.datetime.fromtimestamp(c_time)
-                    date_taken = str(local_time).replace("-", "")
-                    #print(f"6.date_taken={date_taken}")
+                    str_time = str(local_time).replace("-", "").replace(":", "")
+                    if len(str_time) >= 8:
+                        date_taken = str_time[:8]
+                        #print(f"6.date_taken={date_taken}")
             except Exception as ex:
                 if verbose:
                     print(f"Exception:{ex}")
     
     if (date_taken is None) or (len(date_taken) <= 0) or (date_taken.isnumeric() is False):
-        full_name_new: str = os.path.join(root_path, file_name)
+        full_name_new: str = os.path.join(root_path, file_prefix + file_name)
         if full_name_new.lower() == full_name.lower():
             if verbose:
                 print(f"{full_name} - Ignored: Already in place")
@@ -178,7 +190,7 @@ def organize_file(full_name: str, root_path: str, verbose: bool = False, hidden_
     #print(f"month_dir={month_dir}")
     if not os.path.exists(month_dir):
         os.mkdir(month_dir)
-    full_name_new: str = os.path.join(month_dir, file_name)
+    full_name_new: str = os.path.join(month_dir, file_prefix + file_name)
     #print(f"full_name_new={full_name_new}")
     if full_name_new.lower() == full_name.lower():
         if verbose:
